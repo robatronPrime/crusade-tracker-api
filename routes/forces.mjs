@@ -44,11 +44,24 @@ router.post("/", async (req, res) => {
   res.send(result).status(204);
 });
 
-// Update the post with a new comment
-router.patch("/comment/:id", async (req, res) => {
+// Update the post with a new name
+router.patch("/name/:id", async (req, res) => {
   const query = { _id: ObjectId(req.params.id) };
   const updates = {
-    $push: { comments: req.body }
+    $push: { name: req.body }
+  };
+
+  let collection = await db.collection("forces");
+  let result = await collection.updateOne(query, updates);
+
+  res.send(result).status(200);
+});
+
+// Update the force with a new record of achievemnet 
+router.patch("/recordOfAchievemnet/:id", async (req, res) => {
+  const query = { _id: ObjectId(req.params.id) };
+  const updates = {
+    $push: { recordOfAchievemnet: req.body }
   };
 
   let collection = await db.collection("forces");
