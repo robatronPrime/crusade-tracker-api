@@ -1,14 +1,20 @@
 import express from "express";
 import { ObjectId } from "mongodb";
+import db from "../db/conn.mjs";
 
 const router = express.Router();
 
 // Get list of units
 router.get("/", async (req, res) => {
-    let collection = await db.collection("units");
-    let results = await collection.fint({}).limit(50).toArray();
+    try {
+        let collection = await db.collection("units");
+        let results = await collection.find({}).limit(50).toArray();
 
-    res.send(results).status(200);
+        res.send(results).status(200);
+    } catch (error) {
+        console.log(error);
+        res.send("error").status(500);
+    }
 });
 
 // Get single unit
@@ -38,3 +44,5 @@ router.delete("/:id", async (req, res) => {
 
     res.send(result).status(200);
 });
+
+export default router;
