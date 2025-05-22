@@ -34,11 +34,46 @@ router.get("/:id", async (req, res) => {
 
 // Add a new document to the collection
 router.post("/", async (req, res) => {
-  let collection = await db.collection("forces");
-  let newDocument = req.body;
-  newDocument.date = new Date();
-  let result = await collection.insertOne(newDocument);
-  res.send(result).status(204);
+  try {
+    const forceData = req.body;
+
+    if (!forceData || !forceData.userId) {
+      console.error("Error 400: Missing force data or userId");
+      return res.status(400).json({ error: "Missing force data or userId" });
+    }
+
+    const forceDoc = {
+      ...forceData,
+      date: new Date()
+    };
+
+    const collection = await db.collection("forces");
+    const insertResult = await collection.insertOne(forceDoc);
+
+    if (!insertResult.acknowledged) {
+      console.error("Error 500: Failed to insert force");
+      return res.status(500).json({ error: "Failed to insert force" });
+    }
+
+    const forceId = insertResult.insertedId;
+
+    const userCollection = await db.collection("users");
+    const query = { clerkID: forceData.userId };
+    const update = { $push: { forces: ObjectId(forceId) } };
+    const updateResult = await userCollection.updateOne(query, update);
+
+    if (updateResult.modifiedCount === 0) {
+      console.error("Error 500: Failed to update user with force ID");
+      return res.status(500).json({ error: "Failed to update user with force ID" });
+    }
+
+    console.log(res);
+
+    return res.status(201).json({ forceId });
+  } catch (error) {
+    console.error("POST /forces error:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // Update the post with a new name
