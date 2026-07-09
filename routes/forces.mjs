@@ -67,8 +67,6 @@ router.post("/", async (req, res) => {
       return res.status(500).json({ error: "Failed to update user with force ID" });
     }
 
-    console.log(res);
-
     return res.status(201).json({ forceId });
   } catch (error) {
     console.error("POST /forces error:", error);

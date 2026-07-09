@@ -14,14 +14,30 @@ router.get("/", async (req, res) => {
 
 // Get single user
 router.get("/:id", async (req, res) => {
-  let collection = await db.collection("users");
   let query = { clerkID: req.params.id };
-  console.log(collection);
+  let users = await db.collection("users");
+  const forces = await db.collection("forces");
 
-  let result = await collection.findOne(query);
+  let user = await users.findOne(query);
 
-  if (!result) res.send("Not found").status(404);
-  else res.send(result).status(200);
+  if (!user) {
+    return res.status(404).send("Not found");
+  }
+
+  const forceDocs = await forces
+    .find({
+      _id: { $in: user.forces },
+    })
+    .toArray();
+
+  const result = {
+    ...user,
+    forces: forceDocs,
+  }
+
+  console.log(result);
+  
+  return res.status(200).send(result);
 });
 
 // Add new user
