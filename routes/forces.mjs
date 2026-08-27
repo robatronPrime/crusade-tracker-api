@@ -57,8 +57,8 @@ router.post("/", async (req, res) => {
 
     const forceId = insertResult.insertedId;
 
-    const userCollection = await db.collection("users");
     const query = { clerkID: forceData.userId };
+    const userCollection = await db.collection("users");
     const update = { $push: { forces: ObjectId(forceId) } };
     const updateResult = await userCollection.updateOne(query, update);
 
