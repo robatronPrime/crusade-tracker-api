@@ -219,12 +219,37 @@ router.patch("/recordOfAchievemnet/:id", async (req, res) => {
 
 // Delete an entry
 router.delete("/:id", async (req, res) => {
-  const query = { _id: ObjectId(req.params.id) };
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid ID" });
+    }
 
-  const collection = db.collection("forces");
-  let result = await collection.deleteOne(query);
+    const forceObjectId = new ObjectId(req.params.id);
+    const existing = await db.collection("forces").findOne({ _id: forceObjectId });
 
-  res.send(result).status(200);
+    if (!existing) {
+      return res.status(404).json({ error: "Force not found" });
+    }
+
+    await db.collection("units").deleteMany({ forceId: forceObjectId });
+    await db.collection("forces").deleteOne({ _id: forceObjectId });
+
+    try {
+      if (existing.userId) {
+        await db.collection("users").updateOne(
+          { clerkID: existing.userId },
+          { $pull: { forces: forceObjectId } }
+        );
+      }
+    } catch (unlinkError) {
+      console.error("DELETE /forces/:id user unlink error:", unlinkError);
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("DELETE /forces/:id error:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 export default router;
