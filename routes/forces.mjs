@@ -1,7 +1,7 @@
 import express from "express";
 import { ObjectId } from "mongodb";
 import db from "../db/conn.mjs";
-import { resolveForceUnits, sumPointsValue } from "../lib/resolveForceUnits.mjs";
+import { resolveForceUnits, parseFiniteNumber, sumPointsValue } from "../lib/resolveForceUnits.mjs";
 
 const router = express.Router();
 
@@ -78,6 +78,12 @@ router.post("/", async (req, res) => {
       if (!u?.name || String(u.name).trim() === "") {
         return res.status(400).json({ error: "name is required" });
       }
+      if (parseFiniteNumber(u.pointsValue, 0) === null) {
+        return res.status(400).json({ error: "Invalid pointsValue" });
+      }
+      if (parseFiniteNumber(u.modelCount, 0) === null) {
+        return res.status(400).json({ error: "Invalid modelCount" });
+      }
     }
 
     const supplyUsed = sumPointsValue(incomingUnits);
@@ -92,6 +98,7 @@ router.post("/", async (req, res) => {
     const {
       units: _dropUnits,
       supplyUsed: _dropSupplyUsed,
+      id: _dropId,
       ...restForce
     } = forceData;
 
@@ -121,8 +128,8 @@ router.post("/", async (req, res) => {
       const unitDoc = {
         forceId: insertedForceId,
         name: String(u.name).trim(),
-        modelCount: Number(u.modelCount ?? 0),
-        pointsValue: Number(u.pointsValue ?? 0),
+        modelCount: parseFiniteNumber(u.modelCount, 0),
+        pointsValue: parseFiniteNumber(u.pointsValue, 0),
         crusadePoints: Number(u.crusadePoints ?? 0),
         type: u.type ?? "",
         battlesPlayed: 0,

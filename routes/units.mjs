@@ -3,6 +3,7 @@ import { ObjectId } from "mongodb";
 import db from "../db/conn.mjs";
 import {
   isObjectIdRef,
+  parseFiniteNumber,
   recalculateSupplyUsed,
   sumPointsValue,
 } from "../lib/resolveForceUnits.mjs";
@@ -84,7 +85,14 @@ router.post("/", async (req, res) => {
     }
 
     const currentUsed = await recalculateSupplyUsed(db, forceObjectId);
-    const incomingPoints = Number(pointsValue ?? 0);
+    const incomingPoints = parseFiniteNumber(pointsValue, 0);
+    if (incomingPoints === null) {
+      return res.status(400).json({ error: "Invalid pointsValue" });
+    }
+    const parsedModelCount = parseFiniteNumber(modelCount, 0);
+    if (parsedModelCount === null) {
+      return res.status(400).json({ error: "Invalid modelCount" });
+    }
     const supplyLimit = Number(force.supplyLimit ?? 0);
     const supplyUsed = currentUsed + incomingPoints;
 
@@ -99,7 +107,7 @@ router.post("/", async (req, res) => {
     const unit = {
       forceId: forceObjectId,
       name: String(name).trim(),
-      modelCount: Number(modelCount ?? 0),
+      modelCount: parsedModelCount,
       pointsValue: incomingPoints,
       crusadePoints: Number(crusadePoints ?? 0),
       type: type ?? "",
@@ -150,8 +158,20 @@ router.patch("/:id", async (req, res) => {
     delete updates.forceId;
     delete updates.id;
 
+    if (updates.modelCount !== undefined) {
+      const parsedModelCount = parseFiniteNumber(updates.modelCount, 0);
+      if (parsedModelCount === null) {
+        return res.status(400).json({ error: "Invalid modelCount" });
+      }
+      updates.modelCount = parsedModelCount;
+    }
+
     if (updates.pointsValue !== undefined) {
-      updates.pointsValue = Number(updates.pointsValue);
+      const parsedPoints = parseFiniteNumber(updates.pointsValue, 0);
+      if (parsedPoints === null) {
+        return res.status(400).json({ error: "Invalid pointsValue" });
+      }
+      updates.pointsValue = parsedPoints;
       const force = await db.collection("forces").findOne({
         _id: existing.forceId,
       });
