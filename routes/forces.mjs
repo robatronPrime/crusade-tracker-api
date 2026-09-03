@@ -1,7 +1,7 @@
 import express from "express";
 import { ObjectId } from "mongodb";
 import db from "../db/conn.mjs";
-import { sumPointsValue } from "../lib/resolveForceUnits.mjs";
+import { resolveForceUnits, sumPointsValue } from "../lib/resolveForceUnits.mjs";
 
 const router = express.Router();
 
@@ -23,14 +23,26 @@ router.get("/latest", async (req, res) => {
   res.send(results).status(200);
 });
 
-// Get a single post
 router.get("/:id", async (req, res) => {
-  let collection = await db.collection("forces");
-  let query = { _id: ObjectId(req.params.id) };
-  let result = await collection.findOne(query);
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid ID" });
+    }
 
-  if (!result) res.send("Not found").status(404);
-  else res.send(result).status(200);
+    const result = await db.collection("forces").findOne({
+      _id: new ObjectId(req.params.id),
+    });
+
+    if (!result) {
+      return res.status(404).json({ error: "Force not found" });
+    }
+
+    const populated = await resolveForceUnits(db, result);
+    return res.status(200).json(populated);
+  } catch (error) {
+    console.error("GET /forces/:id error:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 router.post("/", async (req, res) => {

@@ -1,6 +1,7 @@
 import express from "express";
 import { ObjectId } from "mongodb";
 import db from "../db/conn.mjs";
+import { resolveForcesUnits } from "../lib/resolveForceUnits.mjs";
 
 const router = express.Router();
 
@@ -30,10 +31,12 @@ router.get("/:id", async (req, res) => {
     })
     .toArray();
 
+  const populatedForces = await resolveForcesUnits(db, forceDocs);
+
   const result = {
     ...user,
-    forces: forceDocs,
-  }
+    forces: populatedForces,
+  };
 
   console.log(result);
   
@@ -80,7 +83,8 @@ router.get("/:id/forces", async (req, res) => {
       .find({ _id: { $in: user.forces.map((id) => new ObjectId(id)) } })
       .toArray();
 
-    return res.status(200).send(forces);
+    const populated = await resolveForcesUnits(db, forces);
+    return res.status(200).send(populated);
   } catch (error) {
     console.error("Error fetching user forces:", error);
     return res.status(500).send({ error: "Server error" });
