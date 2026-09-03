@@ -1,6 +1,7 @@
 import express from "express";
 import { ObjectId } from "mongodb";
 import db from "../db/conn.mjs";
+import { sumPointsValue } from "../lib/resolveForceUnits.mjs";
 
 const router = express.Router();
 
@@ -32,44 +33,141 @@ router.get("/:id", async (req, res) => {
   else res.send(result).status(200);
 });
 
-// Add a new document to the collection
 router.post("/", async (req, res) => {
+  let insertedForceId = null;
+  const insertedUnitIds = [];
+
   try {
     const forceData = req.body;
 
     if (!forceData || !forceData.userId) {
-      console.error("Error 400: Missing force data or userId");
       return res.status(400).json({ error: "Missing force data or userId" });
     }
 
+    const supplyLimit = Number(forceData.supplyLimit ?? 0);
+    if (Number.isNaN(supplyLimit) || supplyLimit < 0) {
+      return res.status(400).json({ error: "Invalid supplyLimit" });
+    }
+
+    // Accept units as array or JSON string (legacy form payload)
+    let incomingUnits = forceData.units ?? [];
+    if (typeof incomingUnits === "string") {
+      try {
+        incomingUnits = incomingUnits ? JSON.parse(incomingUnits) : [];
+      } catch {
+        return res.status(400).json({ error: "Invalid units payload" });
+      }
+    }
+    if (!Array.isArray(incomingUnits)) {
+      return res.status(400).json({ error: "units must be an array" });
+    }
+
+    for (const u of incomingUnits) {
+      if (!u?.name || String(u.name).trim() === "") {
+        return res.status(400).json({ error: "name is required" });
+      }
+    }
+
+    const supplyUsed = sumPointsValue(incomingUnits);
+    if (supplyUsed > supplyLimit) {
+      return res.status(400).json({
+        error: "Supply limit exceeded",
+        supplyUsed,
+        supplyLimit,
+      });
+    }
+
+    const {
+      units: _dropUnits,
+      supplyUsed: _dropSupplyUsed,
+      ...restForce
+    } = forceData;
+
     const forceDoc = {
-      ...forceData,
-      date: new Date()
+      ...restForce,
+      supplyLimit,
+      supplyUsed,
+      units: [],
+      victories: Number(forceData.victories ?? 0),
+      battleTally: Number(forceData.battleTally ?? 0),
+      requisitionPoints: Number(forceData.requisitionPoints ?? 0),
+      recordOfAchievement: forceData.recordOfAchievement ?? [],
+      date: new Date(),
     };
 
-    const collection = await db.collection("forces");
-    const insertResult = await collection.insertOne(forceDoc);
+    const forces = await db.collection("forces");
+    const insertResult = await forces.insertOne(forceDoc);
 
     if (!insertResult.acknowledged) {
-      console.error("Error 500: Failed to insert force");
       return res.status(500).json({ error: "Failed to insert force" });
     }
 
-    const forceId = insertResult.insertedId;
+    insertedForceId = insertResult.insertedId;
 
-    const query = { clerkID: forceData.userId };
-    const userCollection = await db.collection("users");
-    const update = { $push: { forces: ObjectId(forceId) } };
-    const updateResult = await userCollection.updateOne(query, update);
+    const unitsCol = await db.collection("units");
+    for (const u of incomingUnits) {
+      const unitDoc = {
+        forceId: insertedForceId,
+        name: String(u.name).trim(),
+        modelCount: Number(u.modelCount ?? 0),
+        pointsValue: Number(u.pointsValue ?? 0),
+        crusadePoints: Number(u.crusadePoints ?? 0),
+        type: u.type ?? "",
+        battlesPlayed: 0,
+        battlesSurvived: 0,
+        enemyUnitsDestroyed: 0,
+        xp: 0,
+        wargear: [],
+        enhancements: [],
+        battleHonours: [],
+        battleScars: [],
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
 
-    if (updateResult.modifiedCount === 0) {
-      console.error("Error 500: Failed to update user with force ID");
-      return res.status(500).json({ error: "Failed to update user with force ID" });
+      const unitInsert = await unitsCol.insertOne(unitDoc);
+      if (!unitInsert.acknowledged) {
+        throw new Error("Unit insert not acknowledged");
+      }
+      insertedUnitIds.push(unitInsert.insertedId);
     }
 
-    return res.status(201).json({ forceId });
+    if (insertedUnitIds.length > 0) {
+      await forces.updateOne(
+        { _id: insertedForceId },
+        { $set: { units: insertedUnitIds } }
+      );
+    }
+
+    const userUpdate = await db.collection("users").updateOne(
+      { clerkID: forceData.userId },
+      { $push: { forces: insertedForceId } }
+    );
+
+    if (userUpdate.matchedCount === 0) {
+      throw new Error("User not found for force link");
+    }
+
+    return res.status(201).json({
+      forceId: insertedForceId,
+      unitIds: insertedUnitIds,
+    });
   } catch (error) {
     console.error("POST /forces error:", error);
+
+    try {
+      if (insertedUnitIds.length > 0) {
+        await db.collection("units").deleteMany({
+          _id: { $in: insertedUnitIds },
+        });
+      }
+      if (insertedForceId) {
+        await db.collection("forces").deleteOne({ _id: insertedForceId });
+      }
+    } catch (rollbackError) {
+      console.error("POST /forces rollback error:", rollbackError);
+    }
+
     return res.status(500).json({ error: "Internal Server Error" });
   }
 });
