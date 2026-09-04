@@ -37,8 +37,6 @@ router.get("/:id", async (req, res) => {
     ...user,
     forces: populatedForces,
   };
-
-  console.log(result);
   
   return res.status(200).send(result);
 });

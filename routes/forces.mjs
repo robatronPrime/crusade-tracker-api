@@ -1,7 +1,12 @@
 import express from "express";
 import { ObjectId } from "mongodb";
 import db from "../db/conn.mjs";
-import { resolveForceUnits, parseFiniteNumber, sumPointsValue } from "../lib/resolveForceUnits.mjs";
+import {
+  resolveForceUnits,
+  parseFiniteNumber,
+  sumPointsValue,
+  recalculateSupplyUsed,
+} from "../lib/resolveForceUnits.mjs";
 
 const router = express.Router();
 
@@ -215,6 +220,85 @@ router.patch("/recordOfAchievemnet/:id", async (req, res) => {
   let result = await collection.updateOne(query, updates);
 
   res.send(result).status(200);
+});
+
+router.patch("/:id", async (req, res) => {
+  try {
+    if (!ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid ID" });
+    }
+
+    const forceObjectId = new ObjectId(req.params.id);
+    const existing = await db.collection("forces").findOne({ _id: forceObjectId });
+
+    if (!existing) {
+      return res.status(404).json({ error: "Force not found" });
+    }
+
+    const body = req.body ?? {};
+    const updates = {};
+
+    if (body.name !== undefined) {
+      const name = String(body.name).trim();
+      if (!name) {
+        return res.status(400).json({ error: "name is required" });
+      }
+      updates.name = name;
+    }
+
+    if (body.supplyLimit !== undefined) {
+      const supplyLimit = parseFiniteNumber(body.supplyLimit, 0);
+      if (supplyLimit === null || supplyLimit < 0) {
+        return res.status(400).json({ error: "Invalid supplyLimit" });
+      }
+      const supplyUsed = await recalculateSupplyUsed(db, forceObjectId);
+      if (supplyUsed > supplyLimit) {
+        return res.status(400).json({
+          error: "Supply limit exceeded",
+          supplyUsed,
+          supplyLimit,
+        });
+      }
+      updates.supplyLimit = supplyLimit;
+      updates.supplyUsed = supplyUsed;
+    }
+
+    if (body.victories !== undefined) {
+      const victories = parseFiniteNumber(body.victories, 0);
+      if (victories === null || victories < 0) {
+        return res.status(400).json({ error: "Invalid victories" });
+      }
+      updates.victories = victories;
+    }
+
+    if (body.battleTally !== undefined) {
+      const battleTally = parseFiniteNumber(body.battleTally, 0);
+      if (battleTally === null || battleTally < 0) {
+        return res.status(400).json({ error: "Invalid battleTally" });
+      }
+      updates.battleTally = battleTally;
+    }
+
+    if (body.requisitionPoints !== undefined) {
+      const requisitionPoints = parseFiniteNumber(body.requisitionPoints, 0);
+      if (requisitionPoints === null || requisitionPoints < 0) {
+        return res.status(400).json({ error: "Invalid requisitionPoints" });
+      }
+      updates.requisitionPoints = requisitionPoints;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: "No valid fields to update" });
+    }
+
+    await db.collection("forces").updateOne({ _id: forceObjectId }, { $set: updates });
+    const updated = await db.collection("forces").findOne({ _id: forceObjectId });
+    const populated = await resolveForceUnits(db, updated);
+    return res.status(200).json(populated);
+  } catch (error) {
+    console.error("PATCH /forces/:id error:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 // Delete an entry
