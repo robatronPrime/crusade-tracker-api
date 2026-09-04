@@ -6,6 +6,7 @@ import {
   parseFiniteNumber,
   sumPointsValue,
   recalculateSupplyUsed,
+  normalizeRecordOfAchievement,
 } from "../lib/resolveForceUnits.mjs";
 
 const router = express.Router();
@@ -115,7 +116,7 @@ router.post("/", async (req, res) => {
       victories: Number(forceData.victories ?? 0),
       battleTally: Number(forceData.battleTally ?? 0),
       requisitionPoints: Number(forceData.requisitionPoints ?? 0),
-      recordOfAchievement: forceData.recordOfAchievement ?? [],
+      recordOfAchievement: normalizeRecordOfAchievement(forceData.recordOfAchievement),
       date: new Date(),
     };
 
@@ -285,6 +286,10 @@ router.patch("/:id", async (req, res) => {
         return res.status(400).json({ error: "Invalid requisitionPoints" });
       }
       updates.requisitionPoints = requisitionPoints;
+    }
+
+    if (body.recordOfAchievement !== undefined) {
+      updates.recordOfAchievement = normalizeRecordOfAchievement(body.recordOfAchievement);
     }
 
     if (Object.keys(updates).length === 0) {
