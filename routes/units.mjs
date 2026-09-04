@@ -64,8 +64,22 @@ router.get("/:id", async (req, res) => {
 
 router.post("/", async (req, res) => {
   try {
-    const { forceId, name, modelCount, pointsValue, crusadePoints, type } =
-      req.body;
+    const {
+      forceId,
+      name,
+      modelCount,
+      pointsValue,
+      crusadePoints,
+      type,
+      xp,
+      battlesPlayed,
+      battlesSurvived,
+      enemyUnitsDestroyed,
+      wargear,
+      enhancements,
+      battleHonours,
+      battleScars,
+    } = req.body;
 
     if (!forceId) {
       return res.status(400).json({ error: "forceId is required" });
@@ -111,14 +125,14 @@ router.post("/", async (req, res) => {
       pointsValue: incomingPoints,
       crusadePoints: Number(crusadePoints ?? 0),
       type: type ?? "",
-      battlesPlayed: 0,
-      battlesSurvived: 0,
-      enemyUnitsDestroyed: 0,
-      xp: 0,
-      wargear: [],
-      enhancements: [],
-      battleHonours: [],
-      battleScars: [],
+      battlesPlayed: Number(battlesPlayed ?? 0),
+      battlesSurvived: Number(battlesSurvived ?? 0),
+      enemyUnitsDestroyed: Number(enemyUnitsDestroyed ?? 0),
+      xp: Number(xp ?? 0),
+      wargear: Array.isArray(wargear) ? wargear : [],
+      enhancements: Array.isArray(enhancements) ? enhancements : [],
+      battleHonours: Array.isArray(battleHonours) ? battleHonours : [],
+      battleScars: Array.isArray(battleScars) ? battleScars : [],
       createdAt: new Date(),
       updatedAt: new Date(),
     };
