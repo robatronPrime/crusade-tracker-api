@@ -1,53 +1,60 @@
 import express from "express";
 import { ObjectId } from "mongodb";
 import db from "../db/conn.mjs";
+import {
+  isObjectIdRef,
+  parseFiniteNumber,
+  recalculateSupplyUsed,
+  sumPointsValue,
+} from "../lib/resolveForceUnits.mjs";
+import { loadOwnedForce, loadOwnedUnit, sendOwnershipError } from "../lib/ownership.mjs";
 
 const router = express.Router();
 
-// Get list of units
-router.get("/", async (req, res) => {
-    try {
-        let collection = await db.collection("units");
-        let results = await collection.find({}).limit(50).toArray();
+router.get("/", async (_req, res) => {
+  return res.status(403).json({ error: "Forbidden" });
+});
 
-        res.send(results).status(200);
-    } catch (error) {
-        console.log(error);
-        res.send("error").status(500);
+// MUST be before /:id
+router.get("/force/:forceId", async (req, res) => {
+  try {
+    const { forceId } = req.params;
+
+    if (!ObjectId.isValid(forceId)) {
+      return res.status(400).json({ error: "Invalid force ID" });
     }
+
+    const owned = await loadOwnedForce(db, req, forceId);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
+    }
+
+    const units = await db
+      .collection("units")
+      .find({ forceId: new ObjectId(forceId) })
+      .toArray();
+
+    return res.status(200).json(units);
+  } catch (error) {
+    console.error("GET /units/force/:forceId error:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 router.get("/:id", async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({
-        error: "Invalid unit ID"
-      });
+    const owned = await loadOwnedUnit(db, req, req.params.id);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
     }
 
-    const unit = await db
-      .collection("units")
-      .findOne({
-        _id: new ObjectId(req.params.id)
-      });
-
-    if (!unit) {
-      return res.status(404).json({
-        error: "Unit not found"
-      });
-    }
-
-    return res.status(200).json(unit);
+    return res.status(200).json(owned.unit);
   } catch (error) {
     console.error("GET /units/:id error:", error);
-
-    return res.status(500).json({
-      error: "Internal Server Error"
-    });
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-// Add new unit
 router.post("/", async (req, res) => {
   try {
     const {
@@ -56,155 +63,205 @@ router.post("/", async (req, res) => {
       modelCount,
       pointsValue,
       crusadePoints,
-      type
+      type,
+      xp,
+      battlesPlayed,
+      battlesSurvived,
+      enemyUnitsDestroyed,
+      wargear,
+      enhancements,
+      battleHonours,
+      battleScars,
     } = req.body;
 
-    if (!forceId || !name) {
-      return res.status(400).json({
-        error: "forceId and name are required"
-      });
+    if (!forceId) {
+      return res.status(400).json({ error: "forceId is required" });
     }
-
+    if (!name || String(name).trim() === "") {
+      return res.status(400).json({ error: "name is required" });
+    }
     if (!ObjectId.isValid(forceId)) {
-      return res.status(400).json({
-        error: "Invalid force ID"
-      });
+      return res.status(400).json({ error: "Invalid ID" });
     }
 
     const forceObjectId = new ObjectId(forceId);
-
-    // Optional but recommended:
-    // make sure the force actually exists.
-    const force = await db.collection("forces").findOne({
-      _id: forceObjectId
-    });
+    const force = await db.collection("forces").findOne({ _id: forceObjectId });
 
     if (!force) {
-      return res.status(404).json({
-        error: "Force not found"
+      return res.status(404).json({ error: "Force not found" });
+    }
+
+    if (force.userId !== req.clerkID) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const currentUsed = await recalculateSupplyUsed(db, forceObjectId);
+    const incomingPoints = parseFiniteNumber(pointsValue, 0);
+    if (incomingPoints === null) {
+      return res.status(400).json({ error: "Invalid pointsValue" });
+    }
+    const parsedModelCount = parseFiniteNumber(modelCount, 0);
+    if (parsedModelCount === null) {
+      return res.status(400).json({ error: "Invalid modelCount" });
+    }
+    const supplyLimit = Number(force.supplyLimit ?? 0);
+    const supplyUsed = currentUsed + incomingPoints;
+
+    if (supplyUsed > supplyLimit) {
+      return res.status(400).json({
+        error: "Supply limit exceeded",
+        supplyUsed,
+        supplyLimit,
       });
     }
 
     const unit = {
       forceId: forceObjectId,
-
-      name,
-      modelCount: Number(modelCount ?? 0),
-      pointsValue: Number(pointsValue ?? 0),
+      name: String(name).trim(),
+      modelCount: parsedModelCount,
+      pointsValue: incomingPoints,
       crusadePoints: Number(crusadePoints ?? 0),
       type: type ?? "",
-
-      battlesPlayed: 0,
-      battlesSurvived: 0,
-      enemyUnitsDestroyed: 0,
-      xp: 0,
-
-      wargear: [],
-      enhancements: [],
-      battleHonours: [],
-      battleScars: [],
-
+      battlesPlayed: Number(battlesPlayed ?? 0),
+      battlesSurvived: Number(battlesSurvived ?? 0),
+      enemyUnitsDestroyed: Number(enemyUnitsDestroyed ?? 0),
+      xp: Number(xp ?? 0),
+      wargear: Array.isArray(wargear) ? wargear : [],
+      enhancements: Array.isArray(enhancements) ? enhancements : [],
+      battleHonours: Array.isArray(battleHonours) ? battleHonours : [],
+      battleScars: Array.isArray(battleScars) ? battleScars : [],
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     };
 
-    const result = await db
-      .collection("units")
-      .insertOne(unit);
+    const result = await db.collection("units").insertOne(unit);
 
-    return res.status(201).json({
-      unitId: result.insertedId
-    });
+    await db.collection("forces").updateOne(
+      { _id: forceObjectId },
+      {
+        $push: { units: result.insertedId },
+        $set: { supplyUsed },
+      }
+    );
+
+    return res.status(201).json({ unitId: result.insertedId });
   } catch (error) {
     console.error("POST /units error:", error);
-
-    return res.status(500).json({
-      error: "Internal Server Error"
-    });
-  }
-});
-
-router.get("/force/:forceId", async (req, res) => {
-  try {
-    const { forceId } = req.params;
-
-    if (!ObjectId.isValid(forceId)) {
-      return res.status(400).json({
-        error: "Invalid force ID"
-      });
-    }
-
-    const units = await db
-      .collection("units")
-      .find({
-        forceId: new ObjectId(forceId)
-      })
-      .toArray();
-
-    return res.status(200).json(units);
-  } catch (error) {
-    console.error("GET /units/force/:forceId error:", error);
-
-    return res.status(500).json({
-      error: "Internal Server Error"
-    });
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 router.patch("/:id", async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({
-        error: "Invalid unit ID"
-      });
+    const owned = await loadOwnedUnit(db, req, req.params.id);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
     }
 
-    const updates = {
-      ...req.body,
-      updatedAt: new Date()
-    };
+    const existing = owned.unit;
+    const unitObjectId = existing._id;
 
-    // Never allow these to be replaced through this endpoint
+    const updates = { ...req.body, updatedAt: new Date() };
     delete updates._id;
     delete updates.forceId;
+    delete updates.id;
 
-    const result = await db
-      .collection("units")
-      .updateOne(
-        {
-          _id: new ObjectId(req.params.id)
-        },
-        {
-          $set: updates
-        }
-      );
-
-    if (result.matchedCount === 0) {
-      return res.status(404).json({
-        error: "Unit not found"
-      });
+    if (updates.modelCount !== undefined) {
+      const parsedModelCount = parseFiniteNumber(updates.modelCount, 0);
+      if (parsedModelCount === null) {
+        return res.status(400).json({ error: "Invalid modelCount" });
+      }
+      updates.modelCount = parsedModelCount;
     }
 
-    return res.status(200).json({
-      success: true
-    });
+    if (updates.pointsValue !== undefined) {
+      const parsedPoints = parseFiniteNumber(updates.pointsValue, 0);
+      if (parsedPoints === null) {
+        return res.status(400).json({ error: "Invalid pointsValue" });
+      }
+      updates.pointsValue = parsedPoints;
+      const force = owned.force;
+      if (!force) {
+        return res.status(404).json({ error: "Force not found" });
+      }
+
+      const siblings = await db
+        .collection("units")
+        .find({ forceId: existing.forceId })
+        .toArray();
+
+      const embedded = (Array.isArray(force.units) ? force.units : []).filter(
+        (entry) => !isObjectIdRef(entry) && typeof entry === "object"
+      );
+
+      const others = siblings.filter((u) => String(u._id) !== String(unitObjectId));
+      const supplyUsed =
+        sumPointsValue(others) +
+        sumPointsValue(embedded) +
+        Number(updates.pointsValue);
+      const supplyLimit = Number(force.supplyLimit ?? 0);
+
+      if (supplyUsed > supplyLimit) {
+        return res.status(400).json({
+          error: "Supply limit exceeded",
+          supplyUsed,
+          supplyLimit,
+        });
+      }
+
+      await db.collection("units").updateOne(
+        { _id: unitObjectId },
+        { $set: updates }
+      );
+
+      await db.collection("forces").updateOne(
+        { _id: existing.forceId },
+        { $set: { supplyUsed } }
+      );
+
+      return res.status(200).json({ success: true });
+    }
+
+    await db.collection("units").updateOne(
+      { _id: unitObjectId },
+      { $set: updates }
+    );
+
+    return res.status(200).json({ success: true });
   } catch (error) {
     console.error("PATCH /units/:id error:", error);
-
-    return res.status(500).json({
-      error: "Internal Server Error"
-    });
+    return res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-// Delete unit
 router.delete("/:id", async (req, res) => {
-    const query = { _id: ObjectId(req.params.id) };
+  try {
+    const owned = await loadOwnedUnit(db, req, req.params.id);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
+    }
 
-    const collection = db.collection("units");
-    let result = await collection.deleteOne(query);
+    const existing = owned.unit;
+    const unitObjectId = existing._id;
 
-    res.send(result).status(200);
+    await db.collection("units").deleteOne({ _id: unitObjectId });
+
+    await db.collection("forces").updateOne(
+      { _id: existing.forceId },
+      { $pull: { units: unitObjectId } }
+    );
+
+    const supplyUsed = await recalculateSupplyUsed(db, existing.forceId);
+    await db.collection("forces").updateOne(
+      { _id: existing.forceId },
+      { $set: { supplyUsed } }
+    );
+
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error("DELETE /units/:id error:", error);
+    return res.status(500).json({ error: "Internal Server Error" });
+  }
 });
 
 export default router;
