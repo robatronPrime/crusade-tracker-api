@@ -7,17 +7,12 @@ import {
   recalculateSupplyUsed,
   sumPointsValue,
 } from "../lib/resolveForceUnits.mjs";
+import { loadOwnedForce, loadOwnedUnit, sendOwnershipError } from "../lib/ownership.mjs";
 
 const router = express.Router();
 
-router.get("/", async (req, res) => {
-  try {
-    const results = await db.collection("units").find({}).limit(50).toArray();
-    return res.status(200).json(results);
-  } catch (error) {
-    console.error("GET /units error:", error);
-    return res.status(500).json({ error: "Internal Server Error" });
-  }
+router.get("/", async (_req, res) => {
+  return res.status(403).json({ error: "Forbidden" });
 });
 
 // MUST be before /:id
@@ -27,6 +22,11 @@ router.get("/force/:forceId", async (req, res) => {
 
     if (!ObjectId.isValid(forceId)) {
       return res.status(400).json({ error: "Invalid force ID" });
+    }
+
+    const owned = await loadOwnedForce(db, req, forceId);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
     }
 
     const units = await db
@@ -43,19 +43,12 @@ router.get("/force/:forceId", async (req, res) => {
 
 router.get("/:id", async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: "Invalid ID" });
+    const owned = await loadOwnedUnit(db, req, req.params.id);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
     }
 
-    const unit = await db.collection("units").findOne({
-      _id: new ObjectId(req.params.id),
-    });
-
-    if (!unit) {
-      return res.status(404).json({ error: "Unit not found" });
-    }
-
-    return res.status(200).json(unit);
+    return res.status(200).json(owned.unit);
   } catch (error) {
     console.error("GET /units/:id error:", error);
     return res.status(500).json({ error: "Internal Server Error" });
@@ -96,6 +89,10 @@ router.post("/", async (req, res) => {
 
     if (!force) {
       return res.status(404).json({ error: "Force not found" });
+    }
+
+    if (force.userId !== req.clerkID) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     const currentUsed = await recalculateSupplyUsed(db, forceObjectId);
@@ -156,16 +153,13 @@ router.post("/", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: "Invalid ID" });
+    const owned = await loadOwnedUnit(db, req, req.params.id);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
     }
 
-    const unitObjectId = new ObjectId(req.params.id);
-    const existing = await db.collection("units").findOne({ _id: unitObjectId });
-
-    if (!existing) {
-      return res.status(404).json({ error: "Unit not found" });
-    }
+    const existing = owned.unit;
+    const unitObjectId = existing._id;
 
     const updates = { ...req.body, updatedAt: new Date() };
     delete updates._id;
@@ -186,9 +180,7 @@ router.patch("/:id", async (req, res) => {
         return res.status(400).json({ error: "Invalid pointsValue" });
       }
       updates.pointsValue = parsedPoints;
-      const force = await db.collection("forces").findOne({
-        _id: existing.forceId,
-      });
+      const force = owned.force;
       if (!force) {
         return res.status(404).json({ error: "Force not found" });
       }
@@ -244,16 +236,13 @@ router.patch("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: "Invalid ID" });
+    const owned = await loadOwnedUnit(db, req, req.params.id);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
     }
 
-    const unitObjectId = new ObjectId(req.params.id);
-    const existing = await db.collection("units").findOne({ _id: unitObjectId });
-
-    if (!existing) {
-      return res.status(404).json({ error: "Unit not found" });
-    }
+    const existing = owned.unit;
+    const unitObjectId = existing._id;
 
     await db.collection("units").deleteOne({ _id: unitObjectId });
 

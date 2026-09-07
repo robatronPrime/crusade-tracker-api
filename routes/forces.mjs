@@ -1,5 +1,4 @@
 import express from "express";
-import { ObjectId } from "mongodb";
 import db from "../db/conn.mjs";
 import {
   resolveForceUnits,
@@ -8,42 +7,40 @@ import {
   recalculateSupplyUsed,
   normalizeRecordOfAchievement,
 } from "../lib/resolveForceUnits.mjs";
+import { loadOwnedForce, sendOwnershipError } from "../lib/ownership.mjs";
 
 const router = express.Router();
 
 // Create unit collection add refernce in forces
 // Get a list of 50 forces
 router.get("/", async (req, res) => {
-  let collection = await db.collection("forces");
-  let results = await collection.find({}).limit(50).toArray();
-
-  res.send(results).status(200);
+  const results = await db
+    .collection("forces")
+    .find({ userId: req.clerkID })
+    .limit(50)
+    .toArray();
+  res.status(200).send(results);
 });
 
 // Fetches the latest forces
 router.get("/latest", async (req, res) => {
-  let collection = await db.collection("forces");
-  let results = await collection
-    .aggregate([{ $project: { author: 1, title: 1, tags: 1, date: 1 } }, { $sort: { date: -1 } }, { $limit: 3 }])
+  const results = await db
+    .collection("forces")
+    .find({ userId: req.clerkID })
+    .sort({ date: -1 })
+    .limit(3)
     .toArray();
-  res.send(results).status(200);
+  res.status(200).send(results);
 });
 
 router.get("/:id", async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: "Invalid ID" });
+    const owned = await loadOwnedForce(db, req, req.params.id);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
     }
 
-    const result = await db.collection("forces").findOne({
-      _id: new ObjectId(req.params.id),
-    });
-
-    if (!result) {
-      return res.status(404).json({ error: "Force not found" });
-    }
-
-    const populated = await resolveForceUnits(db, result);
+    const populated = await resolveForceUnits(db, owned.force);
     return res.status(200).json(populated);
   } catch (error) {
     console.error("GET /forces/:id error:", error);
@@ -60,6 +57,10 @@ router.post("/", async (req, res) => {
 
     if (!forceData || !forceData.userId) {
       return res.status(400).json({ error: "Missing force data or userId" });
+    }
+
+    if (forceData.userId !== req.clerkID) {
+      return res.status(403).json({ error: "Forbidden" });
     }
 
     const supplyLimit = Number(forceData.supplyLimit ?? 0);
@@ -199,7 +200,12 @@ router.post("/", async (req, res) => {
 
 // Update the post with a new name
 router.patch("/name/:id", async (req, res) => {
-  const query = { _id: ObjectId(req.params.id) };
+  const owned = await loadOwnedForce(db, req, req.params.id);
+  if (owned.error) {
+    return sendOwnershipError(res, owned.error);
+  }
+
+  const query = { _id: owned.force._id };
   const updates = {
     $push: { name: req.body }
   };
@@ -212,7 +218,12 @@ router.patch("/name/:id", async (req, res) => {
 
 // Update the force with a new record of achievemnet
 router.patch("/recordOfAchievemnet/:id", async (req, res) => {
-  const query = { _id: ObjectId(req.params.id) };
+  const owned = await loadOwnedForce(db, req, req.params.id);
+  if (owned.error) {
+    return sendOwnershipError(res, owned.error);
+  }
+
+  const query = { _id: owned.force._id };
   const updates = {
     $push: { recordOfAchievemnet: req.body }
   };
@@ -225,16 +236,13 @@ router.patch("/recordOfAchievemnet/:id", async (req, res) => {
 
 router.patch("/:id", async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: "Invalid ID" });
+    const owned = await loadOwnedForce(db, req, req.params.id);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
     }
 
-    const forceObjectId = new ObjectId(req.params.id);
-    const existing = await db.collection("forces").findOne({ _id: forceObjectId });
-
-    if (!existing) {
-      return res.status(404).json({ error: "Force not found" });
-    }
+    const existing = owned.force;
+    const forceObjectId = existing._id;
 
     const body = req.body ?? {};
     const updates = {};
@@ -309,16 +317,13 @@ router.patch("/:id", async (req, res) => {
 // Delete an entry
 router.delete("/:id", async (req, res) => {
   try {
-    if (!ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: "Invalid ID" });
+    const owned = await loadOwnedForce(db, req, req.params.id);
+    if (owned.error) {
+      return sendOwnershipError(res, owned.error);
     }
 
-    const forceObjectId = new ObjectId(req.params.id);
-    const existing = await db.collection("forces").findOne({ _id: forceObjectId });
-
-    if (!existing) {
-      return res.status(404).json({ error: "Force not found" });
-    }
+    const existing = owned.force;
+    const forceObjectId = existing._id;
 
     await db.collection("units").deleteMany({ forceId: forceObjectId });
     await db.collection("forces").deleteOne({ _id: forceObjectId });
