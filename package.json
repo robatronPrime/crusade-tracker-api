@@ -8,7 +8,7 @@
         "lint": "eslint .",
         "format": "prettier --single-quote --check .",
         "prepare": "cd ../ && husky install server/.husky",
-        "dev": "nodemon --experimental-modules index.mjs"
+        "dev": "nodemon --experimental-modules --watch .env --ext js,mjs,cjs,json,env index.mjs"
     },
     "dependencies": {
         "@clerk/backend": "^3.17.1",

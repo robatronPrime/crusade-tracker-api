@@ -14,6 +14,9 @@ const corsOrigin = process.env.CORS_ORIGIN;
 if (!corsOrigin) {
   console.error("CORS_ORIGIN is not set");
 }
+if (!process.env.CLERK_SECRET_KEY) {
+  console.error("CLERK_SECRET_KEY is not set");
+}
 
 app.use(
   cors({

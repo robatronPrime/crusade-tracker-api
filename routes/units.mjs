@@ -72,6 +72,7 @@ router.post("/", async (req, res) => {
       enhancements,
       battleHonours,
       battleScars,
+      lore,
     } = req.body;
 
     if (!forceId) {
@@ -114,11 +115,13 @@ router.post("/", async (req, res) => {
         supplyLimit,
       });
     }
+    const parsedLore = String(lore ?? "");
 
     const unit = {
       forceId: forceObjectId,
       name: String(name).trim(),
-      modelCount: parsedModelCount,
+      modelCount: parsedModelCount, 
+      lore: parsedLore,
       pointsValue: incomingPoints,
       crusadePoints: Number(crusadePoints ?? 0),
       type: type ?? "",
@@ -220,6 +223,11 @@ router.patch("/:id", async (req, res) => {
       );
 
       return res.status(200).json({ success: true });
+    }
+    
+    if (updates.lore !== undefined) {
+      const parsedLore = String(updates.lore ?? "");
+      updates.lore = parsedLore;
     }
 
     await db.collection("units").updateOne(
