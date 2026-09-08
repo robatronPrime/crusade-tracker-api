@@ -118,6 +118,7 @@ router.post("/", async (req, res) => {
       battleTally: Number(forceData.battleTally ?? 0),
       requisitionPoints: Number(forceData.requisitionPoints ?? 0),
       recordOfAchievement: normalizeRecordOfAchievement(forceData.recordOfAchievement),
+      lore: String(forceData.lore ?? ""),
       date: new Date(),
     };
 
@@ -298,6 +299,10 @@ router.patch("/:id", async (req, res) => {
 
     if (body.recordOfAchievement !== undefined) {
       updates.recordOfAchievement = normalizeRecordOfAchievement(body.recordOfAchievement);
+    }
+
+    if (body.lore !== undefined) {
+      updates.lore = String(body.lore);
     }
 
     if (Object.keys(updates).length === 0) {
